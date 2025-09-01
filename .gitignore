@@ -33,3 +33,8 @@ ENV/
 .vscode/
 .idea/
 *.swp
+
+data/
+
+*.mp4
+git log --oneline --graph --decorate

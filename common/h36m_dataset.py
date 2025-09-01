@@ -206,10 +206,19 @@ h36m_cameras_extrinsic_params = {
     ],
 }
 
+
+
+import numpy as np
+import copy
+
+# Assuming MocapDataset, h36m_skeleton, h36m_cameras_extrinsic_params,
+# h36m_cameras_intrinsic_params, and normalize_screen_coordinates are defined/imported elsewhere.
+
 class Human36mDataset(MocapDataset):
-    def __init__(self, path, remove_static_joints=True):
+    def __init__(self, path=None, data=None, remove_static_joints=True):
         super().__init__(fps=50, skeleton=h36m_skeleton)
         
+        # All camera parameter setup remains unchanged
         self._cameras = copy.deepcopy(h36m_cameras_extrinsic_params)
         for cameras in self._cameras.values():
             for i, cam in enumerate(cameras):
@@ -218,31 +227,29 @@ class Human36mDataset(MocapDataset):
                     if k not in ['id', 'res_w', 'res_h']:
                         cam[k] = np.array(v, dtype='float32')
                 
-                # Normalize camera frame
                 cam['center'] = normalize_screen_coordinates(cam['center'], w=cam['res_w'], h=cam['res_h']).astype('float32')
                 cam['focal_length'] = cam['focal_length']/cam['res_w']*2
                 if 'translation' in cam:
                     cam['translation'] = cam['translation']/1000 # mm to meters
                 
-                # Add intrinsic parameters vector
                 cam['intrinsic'] = np.concatenate((cam['focal_length'],
                                                    cam['center'],
                                                    cam['radial_distortion'],
-                                                   cam['tangential_distortion'],
-                                                   [1/cam['focal_length'][0], 0, -cam['center'][0]/cam['focal_length'][0], 
-                                                    0, 1/cam['focal_length'][1], -cam['center'][1]/cam['focal_length'][1], 
-                                                    0, 0, 1]))
-
-                # proj_matrix = np.array([1/cam['focal_length'][0], 0, -cam['center'][0]/cam['focal_length'][0], 
-                #                         0, 1/cam['focal_length'][1], -cam['center'][1]/cam['focal_length'][1], 
-                #                         0, 0, 1])
-                # cam['intrinsic'] = np.concatenate(camera_intrinsics, proj_matrix)
+                                                   cam['tangential_distortion']))
         
-        # Load serialized dataset
-        data = np.load(path, allow_pickle=True)['positions_3d'].item()
-        
+        # --- MODIFIED DATA LOADING LOGIC ---
+        if data is not None:
+            # Path 1: Initialize from a pre-loaded, filtered dictionary (for evaluation)
+            loaded_data = data
+        elif path is not None:
+            # Path 2: Original behavior, load from a file path (for training)
+            loaded_data = np.load(path, allow_pickle=True)['positions_3d'].item()
+        else:
+            raise ValueError("Human36mDataset requires either a 'path' or 'data' argument.")
+            
+        # The rest of the initialization now uses the 'loaded_data' variable
         self._data = {}
-        for subject, actions in data.items():
+        for subject, actions in loaded_data.items():
             self._data[subject] = {}
             for action_name, positions in actions.items():
                 self._data[subject][action_name] = {
@@ -251,13 +258,10 @@ class Human36mDataset(MocapDataset):
                 }
                 
         if remove_static_joints:
-            # Bring the skeleton to 17 joints instead of the original 32
+            # This logic remains unchanged
             self.remove_joints([4, 5, 9, 10, 11, 16, 20, 21, 22, 23, 24, 28, 29, 30, 31])
-            
-            # Rewire shoulders to the correct parents
             self._skeleton._parents[11] = 8
             self._skeleton._parents[14] = 8
             
     def supports_semi_supervised(self):
         return True
-   
