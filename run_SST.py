@@ -28,7 +28,7 @@ def add_motion_dynamics(sequence_2d):
     dynamic_sequence = np.concatenate((sequence_2d, velocity), axis=-1)
     return dynamic_sequence
 
-# In run_SST.py, replace the entire fetch function
+
 
 def fetch(subjects, keypoints, dataset, action_filter=None, receptive_field=27, subset=1.0):
     """
@@ -67,10 +67,7 @@ def fetch(subjects, keypoints, dataset, action_filter=None, receptive_field=27, 
 
     return out_poses_2d, out_poses_3d
 
-# In run_SST.py
-# In run_SST.py
 
-# In run_SST.py
 
 def evaluate(test_generator, model_pos, joints_left, joints_right, kps_left, kps_right, receptive_field):
     epoch_loss_3d_pos = 0
@@ -94,7 +91,7 @@ def evaluate(test_generator, model_pos, joints_left, joints_right, kps_left, kps
             
             predictions.append(predicted_3d_pos.cpu().numpy())
             
-            # --- THIS IS THE CORRECTED LINE ---
+           
             # Match the prediction by also taking the center frame of the ground truth sequence
             ground_truth.append(gt_3d[:, receptive_field // 2].cpu().numpy())
 
@@ -320,7 +317,7 @@ else:
     keypoints_all_2d = keypoints_all_data['positions_2d'].item()
     keypoints = {subject: keypoints_all_2d[subject] for subject in subjects_test}
 
-    # --- START: ADD THIS MISSING DATA PREPARATION BLOCK ---
+    # --- START MISSING DATA PREPARATION BLOCK ---
     print("Preparing data...")
     for subject in dataset.subjects():
         for action in dataset[subject].keys():
