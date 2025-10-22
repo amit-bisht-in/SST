@@ -15,6 +15,7 @@ import argparse
 # --- Project Imports ---
 from common.camera import normalize_screen_coordinates
 from common.model_sst import SST_Model
+from common.arguments import parse_args
 from common.h36m_dataset import Human36mDataset
 
 # --- Ultralytics Import for 2D Pose Detection ---
@@ -42,7 +43,8 @@ def coco_to_h36m(keypoints):
 # --- Main Application Logic ---
 
 def main(cli_args):
-    receptive_field = 27
+    
+    receptive_field = cli_args.number_of_frames
 
     # --- Load Models ---
     print("Loading 3D SST_Model...")
@@ -56,7 +58,7 @@ def main(cli_args):
     sst_model.eval()
 
     print("Loading 2D YOLOv8-Pose model...")
-    pose_model = YOLO('yolov8n-pose.pt') 
+    pose_model = YOLO(cli_args.yolo_model)
 
     # --- Pass 1: Detect all 2D poses ---
     cap = cv2.VideoCapture(cli_args.video)
@@ -94,8 +96,33 @@ def main(cli_args):
     ax.set_xlabel("X"); ax.set_ylabel("Y (Depth)"); ax.set_zlabel("Z (Height)")
     # ------------------------------------
 
-    lines = [ax.plot([], [], [], 'dodgerblue', linewidth=3)[0] for _ in bones]
-    points = ax.scatter([], [], [], c='red', s=20)
+        # --- Define left and right side joints (H36M indices) ---
+    left_joints = [4, 5, 6, 11, 12, 13]    # left leg + left arm
+    right_joints = [1, 2, 3, 14, 15, 16]   # right leg + right arm  
+    head_joints = [ 9, 10]         # head and spine
+
+
+    # --- Helper function to decide bone color ---
+    def bone_color(parent, child):
+        if parent in left_joints or child in left_joints:
+            return "red"
+        elif parent in right_joints or child in right_joints:
+            return "blue"
+        elif parent in head_joints or child in head_joints:
+            return "pink"
+        else:
+            return "black"   # spine/mid connections
+
+    # --- Create line objects with appropriate colors ---
+    lines = []
+    for parent, child in bones:
+        color = bone_color(parent, child)
+        line, = ax.plot([], [], [], color=color, linewidth=3)
+        lines.append(line)
+
+    # --- All joints (dots) black ---
+    points = ax.scatter([], [], [], c='black', s=20)
+
     keypoints_buffer = collections.deque(maxlen=receptive_field)
 
     def update(frame_index):
@@ -112,7 +139,7 @@ def main(cli_args):
                 predicted_3d_sequence = sst_model(input_tensor)
             
             pose_3d = predicted_3d_sequence[0, receptive_field // 2].cpu().numpy()
-            pose_3d *= 1000
+            pose_3d *= 8000
         
         # --- THIS IS THE TRANSFORMATION FOR THE "LYING DOWN" SKELETON ---
         pose_3d_oriented = np.zeros_like(pose_3d)
@@ -121,7 +148,7 @@ def main(cli_args):
         # New Y (depth) is the original Z (height)
         pose_3d_oriented[:, 1] = pose_3d[:, 2]
         # New Z (height) is the original Y (depth)
-        pose_3d_oriented[:, 2] = pose_3d[:, 1]
+        pose_3d_oriented[:, 2] = - pose_3d[:, 1]
         
         # Center the skeleton vertically
         pose_3d_oriented[:, 2] -= np.mean(pose_3d_oriented[:, 2])
@@ -134,13 +161,28 @@ def main(cli_args):
         points._offsets3d = (pose_3d_oriented[:, 0], pose_3d_oriented[:, 1], pose_3d_oriented[:, 2])
         
         return lines + [points]
+    
 
-    anim = animation.FuncAnimation(fig, update, frames=len(all_2d_poses), interval=40, blit=False)
+    # --- Get FPS of the input video ---
+    cap = cv2.VideoCapture(cli_args.video)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    print("Video FPS:", fps)
+    print("Total frames:", cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    cap.release()
+    
+
+    # --- Compute interval in milliseconds per frame ---
+    interval = int(1000 / fps)
+    anim = animation.FuncAnimation(fig, update, frames=len(all_2d_poses), interval=interval, blit=False)
+
+
     plt.show()
 
+
+# In final_demo.py, at the end of the file
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SST Model Interactive Video Demo')
-    parser.add_argument('--checkpoint-3d', type=str, default='checkpoint/SST_Model_final/best_epoch.bin', help='Path to the trained 3D model checkpoint')
-    parser.add_argument('--video', type=str, required=True, help='Path to the input video file')
-    cli_args = parser.parse_args()
-    main(cli_args)
+    # The main parser now handles all arguments
+    args = parse_args()
+    main(args)

@@ -9,7 +9,10 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Training script')
+    parser.add_argument('--video', type=str, default='input/default.mp4', help='Path to the video file for the demo')
+    parser.add_argument('--checkpoint-3d', type=str, default='checkpoint/SST_Model_final/best_epoch.bin', help='Path to the 3D model checkpoint for the demo')
 
+    parser.add_argument('--epoch-size', type=int, default=None, help='Number of batches per epoch. If not specified, uses the full dataset.')
     # General arguments
     parser.add_argument('-d', '--dataset', default='h36m', type=str, metavar='NAME', help='target dataset') # h36m or humaneva
     parser.add_argument('-k', '--keypoints', default='cpn_ft_h36m_dbb', type=str, metavar='NAME', help='2D detections to use')
@@ -77,6 +80,7 @@ def parse_args():
     parser.add_argument('--viz-limit', type=int, default=-1, metavar='N', help='only render first N frames')
     parser.add_argument('--viz-downsample', type=int, default=1, metavar='N', help='downsample FPS by a factor N')
     parser.add_argument('--viz-size', type=int, default=5, metavar='N', help='image size')
+    parser.add_argument('--yolo-model', type=str, default='yolov8n-pose.pt', help='The 2D YOLOv8-Pose model to use for the demo')
     
     parser.set_defaults(bone_length_term=True)
     parser.set_defaults(data_augmentation=True)
