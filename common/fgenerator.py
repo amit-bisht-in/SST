@@ -1,65 +1,31 @@
-# Copyright (c) 2018-present, Facebook, Inc.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 from itertools import zip_longest
 import numpy as np
 
-
-# def getbone(seq, boneindex):
-#     bs = np.shape(seq)[0]
-#     ss = np.shape(seq)[1]
-#     seq = np.reshape(seq,(bs*ss,-1,3))
-#     bone = []
-#     for index in boneindex:
-#         bone.append(seq[:,index[0]] - seq[:,index[1]])
-#     bone = np.stack(bone,1)
-#     bone = np.power(np.power(bone,2).sum(2),0.5)
-#     bone = np.reshape(bone, (bs,ss,np.shape(bone)[1]))
-#     return bone
-
 class ChunkedGenerator:
     """
-    Batched data generator, used for training.
+    Batched data generator, used for fine-tuning.
     The sequences are split into equal-length chunks and padded as necessary.
-    
-    Arguments:
-    batch_size -- the batch size to use for training
-    cameras -- list of cameras, one element for each video (optional, used for semi-supervised training)
-    poses_3d -- list of ground-truth 3D poses, one element for each video (optional, used for supervised training)
-    poses_2d -- list of input 2D keypoints, one element for each video
-    chunk_length -- number of output frames to predict for each training example (usually 1)
-    pad -- 2D input padding to compensate for valid convolutions, per side (depends on the receptive field)
-    causal_shift -- asymmetric padding offset when causal convolutions are used (usually 0 or "pad")
-    shuffle -- randomly shuffle the dataset before each epoch
-    random_seed -- initial seed to use for the random generator
-    augment -- augment the dataset by flipping poses horizontally
-    kps_left and kps_right -- list of left/right 2D keypoints if flipping is enabled
-    joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
     def __init__(self, batch_size, cameras, poses_3d, poses_2d,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  endless=False):
+        
+        # Ensure the 2D and 3D pose lists have the same number of sequences
         assert poses_3d is None or len(poses_3d) == len(poses_2d), (len(poses_3d), len(poses_2d))
         assert cameras is None or len(cameras) == len(poses_2d)
     
         # Build lineage info
         pairs = [] # (seq_idx, start_frame, end_frame, flip) tuples
-        # Replace the loop with this corrected version
-
         for i in range(len(poses_2d)):
-            # --- NEW SAFETY CHECK ---
-            # If a sequence is shorter than the chunk length, skip it
+            # Ensure 2D and 3D lengths match for this specific sequence
+            assert poses_3d is None or poses_3d[i].shape[0] == poses_2d[i].shape[0]
+            
+            # Skip sequences that are too short to create even one chunk
             if poses_2d[i].shape[0] < chunk_length:
                 continue
-            # --------------------
-
-            assert poses_3d is None or poses_3d[i].shape[0] == poses_2d[i].shape[0]
+                
             n_chunks = (poses_2d[i].shape[0] + chunk_length - 1) // chunk_length
             offset = (n_chunks * chunk_length - poses_2d[i].shape[0]) // 2
             bounds = np.arange(n_chunks+1)*chunk_length - offset
@@ -73,7 +39,6 @@ class ChunkedGenerator:
             self.batch_cam = np.empty((batch_size, cameras[0].shape[-1]))
         if poses_3d is not None:
             self.batch_3d = np.empty((batch_size, chunk_length, poses_3d[0].shape[-2], poses_3d[0].shape[-1]))
-            # self.batch_3d = np.empty((batch_size, chunk_length + 2*pad, poses_3d[0].shape[-2], poses_3d[0].shape[-1]))
         self.batch_2d = np.empty((batch_size, chunk_length + 2*pad, poses_2d[0].shape[-2], poses_2d[0].shape[-1]))
 
         self.num_batches = (len(pairs) + batch_size - 1) // batch_size
@@ -105,7 +70,7 @@ class ChunkedGenerator:
     def set_random_state(self, random):
         self.random = random
         
-    def num_batches(self):             
+    def num_batches(self):         
         return self.num_batches
     
     def augment_enabled(self):
@@ -122,7 +87,6 @@ class ChunkedGenerator:
             return self.state
     
     def next_epoch(self):
-
         enabled = True
         while enabled:
             start_idx, pairs = self.next_pairs()
@@ -153,14 +117,18 @@ class ChunkedGenerator:
                         seq_3d = self.poses_3d[seq_i]
                         low_3d = max(start_3d, 0)
                         high_3d = min(end_3d, seq_3d.shape[0])
+                        
+                        # --- THIS IS THE FIX ---
+                        # Safety check to skip empty or invalid chunks
+                        if low_3d >= high_3d:
+                            continue
+                        # -----------------------
+
                         pad_left_3d = low_3d - start_3d
                         pad_right_3d = end_3d - high_3d
                         if pad_left_3d != 0 or pad_right_3d != 0:
-                        # if pad_left_2d != 0 or pad_right_2d != 0:
-                        #     self.batch_3d[i] = np.pad(seq_3d[low_2d:high_2d], ((pad_left_2d, pad_right_2d), (0, 0), (0, 0)), 'edge')
                             self.batch_3d[i] = np.pad(seq_3d[low_3d:high_3d], ((pad_left_3d, pad_right_3d), (0, 0), (0, 0)), 'edge')
                         else:
-                            # self.batch_3d[i] = seq_3d[low_2d:high_2d]
                             self.batch_3d[i] = seq_3d[low_3d:high_3d]
 
                         if flip:
@@ -173,7 +141,6 @@ class ChunkedGenerator:
                     if self.cameras is not None:
                         self.batch_cam[i] = self.cameras[seq_i]
                         if flip:
-                            # Flip horizontal distortion coefficients
                             self.batch_cam[i, 2] *= -1
                             self.batch_cam[i, 7] *= -1
 
@@ -183,55 +150,49 @@ class ChunkedGenerator:
                     yield None, None, self.batch_2d[:len(chunks)]
                 elif self.poses_3d is not None and self.cameras is None:
                     yield None, self.batch_3d[:len(chunks)], self.batch_2d[:len(chunks)]
-                    # yield None, self.batch_bins_3d[:len(chunks)], self.batch_2d[:len(chunks)]
                 elif self.poses_3d is None:
                     yield self.batch_cam[:len(chunks)], None, self.batch_2d[:len(chunks)]
                 else:
                     yield self.batch_cam[:len(chunks)], self.batch_3d[:len(chunks)], self.batch_2d[:len(chunks)]
-                    # yield self.batch_cam[:len(chunks)], self.batch_bins_3d[:len(chunks)], self.batch_2d[:len(chunks)]
-            
+                
             if self.endless:
                 self.state = None
             else:
                 enabled = False
-            
-
 
 class UnchunkedGenerator:
     """
-    An upgraded generator for evaluation.
-    It takes long sequences and breaks them down into overlapping chunks
-    of the correct receptive field size for the model.
+    Generator for evaluation.
+    It yields entire sequences one by one, with the necessary 2D padding.
     """
     def __init__(self, cameras, poses_3d, poses_2d, pad=0, causal_shift=0, augment=False,
                  kps_left=None, kps_right=None, joints_left=None, joints_right=None):
         assert poses_3d is not None
+        
         self.poses_3d = poses_3d
         self.poses_2d = poses_2d
-        self.receptive_field = 2 * pad + 1
+        self.pad = pad
         
-        # Build a list of all possible chunks from all test sequences
-        self.chunks = []
-        for i in range(len(self.poses_2d)):
-            num_frames = self.poses_2d[i].shape[0]
-            # Create a chunk for each valid frame in the sequence
-            for start_frame in range(num_frames - self.receptive_field + 1):
-                self.chunks.append((i, start_frame)) # (sequence_index, start_frame_index)
-
-        self.num_batches = len(self.chunks)
+        self.num_batches = len(self.poses_2d)
 
     def next_epoch(self):
-        for seq_idx, start_frame in self.chunks:
-            end_frame = start_frame + self.receptive_field
+        for i in range(len(self.poses_2d)):
+            seq_2d = self.poses_2d[i]
+            seq_3d = self.poses_3d[i]
             
-            # Create a batch of size 1 for each chunk
-            batch_2d = np.expand_dims(self.poses_2d[seq_idx][start_frame:end_frame], axis=0)
+            # Apply padding to the 2D sequence to match the model's receptive field
+            padded_2d = np.pad(seq_2d, ((self.pad, self.pad), (0, 0), (0, 0)), 'edge')
             
-            # For evaluation, we only need the center frame of the ground truth
-            center_frame = start_frame + (self.receptive_field // 2)
-            batch_3d = np.expand_dims(np.expand_dims(self.poses_3d[seq_idx][center_frame], axis=0), axis=0)
+            # Expand dims to create a batch of size 1
+            batch_2d = np.expand_dims(padded_2d, axis=0)
+            batch_3d = np.expand_dims(seq_3d, axis=0)
             
             yield None, batch_3d, batch_2d
 
     def num_frames(self):
-        return len(self.chunks)
+        # This is used by the old evaluate function
+        count = 0
+        for seq in self.poses_2d:
+            count += seq.shape[0]
+        return count
+
